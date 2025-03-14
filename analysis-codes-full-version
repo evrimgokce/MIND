@@ -56,6 +56,44 @@ sex_distribution <- Data %>%
 # Display results
 print(sex_distribution)
 
+# Outlier analysis
+variables <- c("BDNF", "CTSB", "DSST_correct", 
+               "NBmeanRT_correct_trials", "NBACC_trials",
+               "ConflictEffect", "SimonEffect")
+
+times <- c(1, 2)  # pre (1), post (2)
+
+for(var in variables) {
+  for(t in times) {
+    
+    # Extract the data as a vector directly
+    data_subset <- DATA_Germen[[var]][DATA_Germen$Time == t]
+    
+    # Calculate Interquartile Range (IQR)
+    Q1 <- quantile(data_subset, 0.25, na.rm = TRUE)
+    Q3 <- quantile(data_subset, 0.75, na.rm = TRUE)
+    IQR_val <- Q3 - Q1
+    
+    # Determine outlier thresholds
+    lower_bound <- Q1 - 1.5 * IQR_val
+    upper_bound <- Q3 + 1.5 * IQR_val
+    
+    # Identify outliers
+    outlier_idx <- which(data_subset < lower_bound | data_subset > upper_bound)
+    outlier_values <- data_subset[outlier_idx]
+    
+    # Display results
+    cat("\nOutlier Analysis for", var, "(Time =", ifelse(t == 1, "Pre", "Post"), "):\n")
+    if(length(outlier_idx) > 0){
+      cat("Number of Outliers:", length(outlier_idx), "\n")
+      cat("Outlier indices in subset:", outlier_idx, "\n")
+      cat("Outlier values:", outlier_values, "\n")
+    } else {
+      cat("No outliers detected.\n")
+    }
+  }
+}
+
 
 # Function to calculate Mean and SE
 mean_se <- function(x) {
