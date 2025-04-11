@@ -228,38 +228,31 @@ check_lme_assumptions(model_ConflictEffect)
 # 5) Visualization 
 # 5.1. Boxplots for BDNF and CTSB
 
-# Function to create boxplots
-plot_boxplot <- function(data, outcome, y_label, y_limit) {
-  cognitive_motor_x <- which(levels(data$Group) == "Cognitive + Motor")
-  
-  ggplot(data, aes(x = Group, y = !!sym(outcome), fill = Time)) +
-    geom_boxplot(width = 0.5, position = position_dodge(width = 0.5), outlier.shape = NA, coef = 0.6, lwd = 0.05) +
-    scale_fill_manual(values = c("Pre" = "gray", "Post" = "pink")) +  
-    scale_y_continuous(limits = c(0, y_limit), breaks = seq(0, y_limit, by = 2500)) +
-    geom_segment(aes(x = cognitive_motor_x - 0.2, xend = cognitive_motor_x + 0.2, 
-                     y = y_limit - 1000, yend = y_limit - 1000), size = 0.5, color = "black") +
-    annotate("text", x = cognitive_motor_x, y = y_limit - 500, label = "* p = 0.02", size = 5) +
-    labs(x = NULL, y = y_label, fill = "Time") +
-    theme_minimal() +
-    theme(
-      axis.line = element_line(size = 0.3, color = "black"),
-      panel.grid.major = element_blank(), 
-      panel.grid.minor = element_blank(),
-      axis.ticks.y = element_line(size = 0.5, color = "black"),
-      axis.ticks.length = unit(0.3, "cm"),
-      plot.margin = margin(1, 1, 1, 1),
-      legend.position = "right",
-      legend.text = element_text(size = 12),
-      legend.key.size = unit(1.2, "cm"),
-      axis.text.x = element_text(size = 14),
-      axis.text.y = element_text(size = 12),
-      axis.title.y = element_text(size = 14)
-    )
-}
+# Function to create barplots
+ggplot(summary_data, aes(x = Group, y = mean_BDNF, fill = Time)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.7), width = 0.7) +
+  geom_errorbar(
+    aes(ymin = mean_BDNF - sem_BDNF, ymax = mean_BDNF + sem_BDNF),
+    position = position_dodge(width = 0.7),
+    width = 0.2
+  ) +
+  geom_segment(aes(x = 2.95, xend = 3.15, y = 6700, yend = 6700)) +  # çizgi
+  annotate("text", x = 3, y = 7000, label = "* p = 0.02", size = 5) +  # p-value
+  labs(
+    x = "",
+    y = "BDNF (pg/ml)",
+    fill = "Time"
+  ) +
+  scale_fill_manual(values = c("gray70", "lightpink")) +
+  theme(
+    panel.background = element_rect(fill = "white", colour = NA),       # white background
+    panel.grid.major = element_blank(),  # no grids
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black"),  
+    axis.ticks = element_line(color = "black"), 
+    text = element_text(size = 14)
+  )
 
-# Generate boxplots
-plot_boxplot(Data_Germen, "BDNF", "BDNF (pg/ml)", 13500)
-plot_boxplot(Data_Germen, "CTSB", "CTSB (pg/ml)", 5000)
 
 # 5.2. Line plots for cognitive outcomes
 
