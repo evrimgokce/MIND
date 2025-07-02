@@ -225,6 +225,23 @@ check_lme_assumptions(model_NBmeanRT)
 check_lme_assumptions(model_SimonEffect)
 check_lme_assumptions(model_ConflictEffect)
 
+# 4.5. Compare results with and without outliers
+# Fit the model and calculate residuals
+model <- lmer(Variable ~ Group * Time + Age + Sex + (1 | ID), data = DATA_Germen)
+res <- residuals(model)
+abs_res <- abs(res)
+# Determine outlier threshold (mean + 2*SD)
+threshold <- mean(abs_res) + 2 * sd(abs_res)
+# Identify outlier observations
+all_outliers <- which(abs_res > threshold)
+# Create dataset excluding outliers
+DATA_no_outliers <- DATA_Germen[-all_outliers, ]
+# Fit the model without outliers
+model_no_outliers <- lmer(Variable ~ Group * Time + Age + Sex + (1 | ID), data = DATA_no_outliers)
+# Display model summary
+summary(model_no_outliers)
+
+
 # 5) Visualization 
 # 5.1. Boxplots for BDNF and CTSB
 
