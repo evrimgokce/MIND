@@ -284,32 +284,80 @@ plot_cognitive_test <- function(test_variable, y_label) {
     mutate(Group = factor(Group, levels = c("Cognitive", "Motor", "Cognitive + Motor")),
            Time = factor(Time, levels = c("Pre", "Post")))
   
-  ggplot(Data_Cognitive, aes(x = Time, y = !!sym(test_variable), group = Group, color = Group)) +
-    geom_line(size = 1) +
-    geom_point(size = 3) +
-    scale_color_manual(values = c("Cognitive" = "#FFB6C1", "Motor" = "gray", "Cognitive + Motor" = "lightblue")) +
-    labs(x = "Pre-Intervention                Post-Intervention", y = y_label, color = "Group") +
-    theme_minimal() +
+  ggplot(DATA_Germen, aes(x = Time, y = NBACC_trials, color = Group)) +
+  stat_summary(fun = mean, geom = "point", size = 3) +
+  stat_summary(fun = mean, geom = "line", aes(group = Group), 
+               size = 1, linetype = "solid") +  # Solid line
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.1) +
+  scale_color_manual(values = c("Cognitive" = "#F4B6C2",
+                                "Motor" = "#9E9E9E",
+                                "Cognitive + Motor" = "#9ED1E0")) +
+  labs(y = "N-back Accuracy", x = "") +  # Added X-axis title
+  theme_bw() +  # White background and grid lines
+  theme(
+    panel.grid.major = element_blank(),  # Removed grid lines
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),      # No sidelines
+    axis.line = element_line(color = "black"),  # X and Y axis lines
+    legend.title = element_blank(),
+    axis.text.x = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    panel.background = element_rect(fill = "white"),  # arka plan beyaz
+    legend.text = element_text(size = 14),
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))  # Y-axis margins
+library(ggplot2)
+library(patchwork)
+
+# Shared themes
+shared_theme <- function() {
+  theme_bw(base_size = 14) +  # Temel yazı boyutu 14 punto
     theme(
-      axis.line = element_line(size = 0.8, color = "black"),
-      panel.grid.major = element_blank(), 
-      panel.grid.minor = element_blank(),
-      axis.text.x = element_text(size = 12, face = "bold"),
-      axis.text.y = element_text(size = 12),
-      axis.title.y = element_text(size = 14),
-      legend.position = "right",
-      legend.text = element_text(size = 12),
-      legend.title = element_text(size = 13, face = "bold")
+      axis.title = element_text(size = 14, face = "bold"),  
+      axis.text = element_text(size = 12, color = "black"), 
+      legend.text = element_text(size = 14),                
+      legend.title = element_blank(),                     
+      panel.grid.major = element_blank(),                 
+      panel.grid.minor = element_blank(),                  
+      panel.border = element_blank(),                    
+      axis.line = element_line(color = "black")            
     )
 }
 
-# Generate plots for all cognitive tests
-plots <- lapply(cognitive_tests, function(test) {
-  plot_cognitive_test(test, paste(test, "(ms)"))  # Customize y-label if needed
-})
+# Graphic 1: Simon Effect
+plot1 <- ggplot(DATA_Germen, aes(x = Time, y = SimonEffect, color = Group)) +
+  stat_summary(fun = mean, geom = "point", size = 3) +
+  stat_summary(fun = mean, geom = "line", aes(group = Group), size = 1) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.1) +
+  scale_color_manual(values = c("Cognitive" = "#F4B6C2", 
+                                "Motor" = "#9E9E9E", 
+                                "Cognitive + Motor" = "#9ED1E0")) +
+  labs(y = "Simon Effect (ms)", x = NULL) +
+  shared_theme()  
 
-# Display all plots in a grid (Optional)
-wrap_plots(plots)
+# Graphic 2: Conflict Effect
+plot2 <- ggplot(DATA_Germen, aes(x = Time, y = ConflictEffect, color = Group)) +
+  stat_summary(fun = mean, geom = "point", size = 3) +
+  stat_summary(fun = mean, geom = "line", aes(group = Group), size = 1) +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.1) +
+  scale_color_manual(values = c("Cognitive" = "#F4B6C2",
+                                "Motor" = "#9E9E9E",
+                                "Cognitive + Motor" = "#9ED1E0")) +
+  labs(y = "Conflict Effect (%)", x = "Intervention Time") +
+  shared_theme() 
+
+# Combining graphics
+combined_plots <- plot1 / plot2 + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "bottom",
+        legend.margin = margin(t = -10))  
+
+# Visualize graphics
+print(combined_plots)
+
+# Save ( 300 DPI PNG)
+ggsave("combined_plots.png", combined_plots, 
+       width = 8, height = 10, dpi = 300)
 
 
 # 6) Correlation Analysis
