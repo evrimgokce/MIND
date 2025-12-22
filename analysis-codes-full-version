@@ -69,8 +69,8 @@ for(var in variables) {
   for(t in times) {
     
     # Extract the data as a vector directly
-    data_subset <- DATA_Germen[[var]][DATA_Germen$Time == t]
-    
+    data_subset <- Data[[var]][Data$Time == levels(Data$Time)[t]]
+
     # Calculate Interquartile Range (IQR)
     Q1 <- quantile(data_subset, 0.25, na.rm = TRUE)
     Q3 <- quantile(data_subset, 0.75, na.rm = TRUE)
@@ -219,7 +219,7 @@ run_lmem <- function(outcome,
     print(summary(int_contr, infer = TRUE, adjust = p_adjust))
   }
 
-  invisible(list(model = model, emm = emm))
+ invisible(list(model = model, emm = emm, chg = chg, int_contr = if (exists("int_contr")) int_contr else NULL))
 }
 
 # ---- 4.1 Myokines (BDNF, CTSB): no Education covariate ----
@@ -297,13 +297,11 @@ check_lme_assumptions <- function(model) {
   
 }
 # 4.4. Apply assumption checks after each LMEM
-check_lme_assumptions(model_BDNF)
-check_lme_assumptions(model_CTSB)
-check_lme_assumptions(model_DSST)
-check_lme_assumptions(model_NBACC)
-check_lme_assumptions(model_NBmeanRT)
-check_lme_assumptions(model_SimonEffect)
-check_lme_assumptions(model_ConflictEffect)
+check_lme_assumptions(res_BDNF$model)
+check_lme_assumptions(res_CTSB$model)
+check_lme_assumptions(res_NBACC$model)
+check_lme_assumptions(res_NBmeanRT$model)
+check_lme_assumptions(res_SimonEffect$model)
 
 # 4.5. Compare results with and without outliers
 # Fit the model and calculate residuals
@@ -326,7 +324,7 @@ summary(model_no_outliers)
 # 5.1. Bar plot for BDNF based on LMEM estimated marginal means (EMMs)
 
 # Convert emmeans object to data frame
-emm_df <- as.data.frame(emm)
+emm_df <- as.data.frame(res_BDNF$emm)
 
 ggplot(emm_df, aes(x = Group, y = emmean, fill = Time)) +
   geom_bar(
@@ -362,171 +360,99 @@ ggsave(
   height = 6,
   dpi = 300
 )
+# ------------------------------------------------------------
+# 5.2) Cognitive outcomes figures (EMM-based; no patchwork/cowplot)
+# ------------------------------------------------------------
+install.packages("gridExtra")
+library(gridExtra)
 
-# 5.2. Line plots for cognitive outcomes
+# make an EMM barplot (same look across outcomes)
+plot_emm_bar <- function(emm_obj, ylab, p_label = NULL, p_x = NULL, p_y = NULL) {
 
-
-# List of cognitive test variables
-cognitive_tests <- c("SimonEffect", "DSST_correct", "NBmeanRT_correct_trials", "ConflictEffect", "NBmeanRT_correct_trials")
-
-# Function to create a line plot for each cognitive test
-plot_cognitive_test <- function(test_variable, y_label) {
-  Data_Cognitive <- Data %>%
-    filter(!is.na(!!sym(test_variable))) %>%
-    mutate(Group = factor(Group, levels = c("Cognitive", "Motor", "Cognitive + Motor")),
-           Time = factor(Time, levels = c("Pre", "Post")))
-  
-  ggplot(DATA_Germen, aes(x = Time, y = NBACC_trials, color = Group)) +
-  stat_summary(fun = mean, geom = "point", size = 3) +
-  stat_summary(fun = mean, geom = "line", aes(group = Group), 
-               size = 1, linetype = "solid") +  # Solid line
-  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.1) +
-  scale_color_manual(values = c("Cognitive" = "#F4B6C2",
-                                "Motor" = "#9E9E9E",
-                                "Cognitive + Motor" = "#9ED1E0")) +
-  labs(y = "N-back Accuracy", x = "") +  # Added X-axis title
-  theme_bw() +  # White background and grid lines
-  theme(
-    panel.grid.major = element_blank(),  # Removed grid lines
-    panel.grid.minor = element_blank(),
-    panel.border = element_blank(),      # No sidelines
-    axis.line = element_line(color = "black"),  # X and Y axis lines
-    legend.title = element_blank(),
-    axis.text.x = element_text(size = 14),
-    axis.title = element_text(size = 14),
-    panel.background = element_rect(fill = "white"),  # arka plan beyaz
-    legend.text = element_text(size = 14),
-  ) +
-  scale_y_continuous(expand = expansion(mult = c(0.05, 0.1)))  # Y-axis margins
-library(ggplot2)
-library(patchwork)
-
-# Shared themes
-shared_theme <- function() {
-  theme_bw(base_size = 14) +  # Temel yazı boyutu 14 punto
-    theme(
-      axis.title = element_text(size = 14, face = "bold"),  
-      axis.text = element_text(size = 12, color = "black"), 
-      legend.text = element_text(size = 14),                
-      legend.title = element_blank(),                     
-      panel.grid.major = element_blank(),                 
-      panel.grid.minor = element_blank(),                  
-      panel.border = element_blank(),                    
-      axis.line = element_line(color = "black")            
+  emm_df <- as.data.frame(emm_obj) %>%
+    mutate(
+      Group = factor(Group, levels = c("cogT", "motT", "DTT")),
+      Time  = factor(Time,  levels = c("pre", "post"))
     )
-}
 
-# Graphic 1: Simon Effect
-plot1 <- ggplot(DATA_Germen, aes(x = Time, y = SimonEffect, color = Group)) +
-  stat_summary(fun = mean, geom = "point", size = 3) +
-  stat_summary(fun = mean, geom = "line", aes(group = Group), size = 1) +
-  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.1) +
-  scale_color_manual(values = c("Cognitive" = "#F4B6C2", 
-                                "Motor" = "#9E9E9E", 
-                                "Cognitive + Motor" = "#9ED1E0")) +
-  labs(y = "Simon Effect (ms)", x = NULL) +
-  shared_theme()  
+  p <- ggplot(emm_df, aes(x = Group, y = emmean, fill = Time)) +
+    geom_bar(stat = "identity",
+             position = position_dodge(width = 0.7),
+             width = 0.65,
+             color = "black") +
+    geom_errorbar(
+      aes(ymin = emmean - SE, ymax = emmean + SE),
+      position = position_dodge(width = 0.7),
+      width = 0.2
+    ) +
+    labs(
+      y = ylab,
+      x = "",
+      fill = "Time"
+    ) +
+    scale_fill_manual(values = c("grey70", "lightpink")) +
+    theme_classic(base_size = 14) +
+    theme(
+      axis.text.x = element_text(size = 14, face = "bold")  # larger group labels
+    )
 
-# Graphic 2: Conflict Effect
-plot2 <- ggplot(DATA_Germen, aes(x = Time, y = ConflictEffect, color = Group)) +
-  stat_summary(fun = mean, geom = "point", size = 3) +
-  stat_summary(fun = mean, geom = "line", aes(group = Group), size = 1) +
-  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.1) +
-  scale_color_manual(values = c("Cognitive" = "#F4B6C2",
-                                "Motor" = "#9E9E9E",
-                                "Cognitive + Motor" = "#9ED1E0")) +
-  labs(y = "Conflict Effect (%)", x = "Intervention Time") +
-  shared_theme() 
-
-# Combining graphics
-combined_plots <- plot1 / plot2 + 
-  plot_layout(guides = "collect") & 
-  theme(legend.position = "bottom",
-        legend.margin = margin(t = -10))  
-
-# Visualize graphics
-print(combined_plots)
-
-# Save ( 300 DPI PNG)
-ggsave("combined_plots.png", combined_plots, 
-       width = 8, height = 10, dpi = 300)
-
-
-# 6) Correlation Analysis
-
-# Function to test normality for each cognitive outcome
-normality_test <- function(variable) {
-  print(paste("Shapiro-Wilk normality test for", variable))
-  for (group in 0:2) {
-    cat("\nGroup:", group, "\n")
-    print(shapiro.test(subset(Data, Group == group)[[variable]]))
+  # Optional p-value annotation
+  if (!is.null(p_label) && !is.null(p_x) && !is.null(p_y)) {
+    p <- p +
+      annotate("segment", x = p_x - 0.15, xend = p_x + 0.15, y = p_y, yend = p_y) +
+      annotate("text", x = p_x, y = p_y * 1.03, label = p_label, size = 5)
   }
+
+  return(p)
 }
 
-# Run normality test for all cognitive variables
-variables <- c("DeltaBDNF", "DeltaDSST", "DeltaCTSB", "DeltaNBAcc", "DeltaNBRT", "DeltaSE", "DeltaCE")
-for (var in variables) {
-  normality_test(var)
-}
+# Simon Effect figure 
+p_Simon <- plot_emm_bar(
+  emm_obj = emm_Simon,
+  ylab = "Simon Effect (ms)"
+)
 
-# Function to compute correlation
-correlation_test <- function(x, y, method) {
-  if (sum(!is.na(x) & !is.na(y)) > 2) { # At least 3 valid data points required
-    test <- cor.test(x, y, use = "pairwise.complete.obs", method = method)
-    return(c(correlation = test$estimate, p_value = test$p.value))
-  } else {
-    return(c(correlation = NA, p_value = NA))
-  }
-}
+ggsave("Figure_SimonEffect.png", p_Simon, width = 8, height = 6, dpi = 300)
 
-# Compute Pearson and Spearman correlations by group
-cor_results <- Data %>%
-  group_by(Group) %>%
-  summarise(
-    BDNF_DSST_pearson_cor = correlation_test(DeltaBDNF, DeltaDSST, "pearson")["correlation"],
-    BDNF_DSST_pearson_p = correlation_test(DeltaBDNF, DeltaDSST, "pearson")["p_value"],
-    BDNF_NBAcc_pearson_cor = correlation_test(DeltaBDNF, DeltaNBAcc, "spearman")["correlation"],
-    BDNF_NBAcc_pearson_p = correlation_test(DeltaBDNF, DeltaNBAcc, "spearman")["p_value"],
-    BDNF_NBRT_pearson_cor = correlation_test(DeltaBDNF, DeltaNBRT, "spearman")["correlation"],
-    BDNF_NBRT_pearson_p = correlation_test(DeltaBDNF, DeltaNBRT, "spearman")["p_value"],
-    BDNF_SE_pearson_cor = correlation_test(DeltaBDNF, DeltaSE, "spearman")["correlation"],
-    BDNF_SE_pearson_p = correlation_test(DeltaBDNF, DeltaSE, "spearman")["p_value"],
-    BDNF_CE_spearman_cor = correlation_test(DeltaBDNF, DeltaCE, "spearman")["correlation"],
-    BDNF_CE_spearman_p = correlation_test(DeltaBDNF, DeltaCE, "spearman")["p_value"],
-    CTSB_DSST_spearman_cor = correlation_test(DeltaCTSB, DeltaDSST, "spearman")["correlation"],
-    CTSB_DSST_spearman_p = correlation_test(DeltaCTSB, DeltaDSST, "spearman")["p_value"],
-    CTSB_CE_spearman_cor = correlation_test(DeltaCTSB, DeltaCE, "spearman")["correlation"],
-    CTSB_CE_spearman_p = correlation_test(DeltaCTSB, DeltaCE, "spearman")["p_value"],
-    CTSB_NBAcc_spearman_cor = correlation_test(DeltaCTSB, DeltaNBAcc, "spearman")["correlation"],
-    CTSB_NBAcc_spearman_p = correlation_test(DeltaCTSB, DeltaNBAcc, "spearman")["p_value"],
-    CTSB_NBRT_spearman_cor = correlation_test(DeltaCTSB, DeltaNBRT, "spearman")["correlation"],
-    CTSB_NBRT_spearman_p = correlation_test(DeltaCTSB, DeltaNBRT, "spearman")["p_value"],
-    CTSB_SE_spearman_cor = correlation_test(DeltaCTSB, DeltaSE, "spearman")["correlation"],
-    CTSB_SE_spearman_p = correlation_test(DeltaCTSB, DeltaSE, "spearman")["p_value"],
-    .groups = "drop"
-  )
+# N-back Accuracy figure 
+p_NbackAcc <- plot_emm_bar(
+  emm_obj = emm_Nback,
+  ylab = "N-back Accuracy (%)"
+)
 
-# Display correlation results
-print(cor_results)
+ggsave("Figure_NbackAcc.png", p_NbackAcc, width = 8, height = 6, dpi = 300)
 
-# 7) Moderation Analysis
+# N-back mean Reactio Time figure 
+p_NBmeanRT <- plot_emm_bar(
+  emm_obj = emm_Nback,
+  ylab = "N-back RT (ms)"
+)
 
-# Define function for moderation analysis
-run_moderation_analysis <- function(outcome_var) {
-  formula <- as.formula(paste(outcome_var, "~ DeltaBDNF_centered * Group"))
-  model <- rlm(formula, data = DATA_Germen)
-  
-  cat("\nModeration Analysis for:", outcome_var, "\n")
-  print(summary(model))
-  
-  return(model)
-}
+ggsave("Figure_NBmeanRT.png", p_NbackAcc, width = 8, height = 6, dpi = 300)
+print(combined)
 
-# List of cognitive outcomes
-cognitive_outcomes <- c("DeltaCE", "DeltaSE", 
-                        "DeltaNBAcc", "DeltaNBRT", "DeltaDSST")
+install.packages("gridExtra")
+library(gridExtra)
 
-# Run the models for all outcomes
-moderation_models <- lapply(cognitive_outcomes, run_moderation_analysis)
+# p_Nback  -> Accuracy plot (up)
+# p_NBmeanRT     -> RT plot (down)
+
+combined <- gridExtra::arrangeGrob(
+  p_Nback, p_NBmeanRT,
+  ncol = 1,
+  heights = c(1, 1)   # same size
+)
+
+grid::grid.draw(combined)
+
+# save combined figure
+ggsave(
+  filename = "Figure_Nback_Combined.png",
+  plot = combined,
+  width = 8, height = 12, dpi = 300
+)
+
+
+
 
 
