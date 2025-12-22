@@ -160,9 +160,6 @@ print(Data_wide)
 
 # 4) Linear Mixed Model for Myokines and Cognitive Outcomes
 
-# 4) Linear Mixed Model for Myokines and Cognitive Outcomes
-
-# ---- Helper: run LMEM + Type III ANOVA + EMMs + (optional) post-hoc contrasts ----
 run_lmem <- function(outcome,
                      add_education = FALSE,
                      do_posthoc_interaction = TRUE,
@@ -247,13 +244,6 @@ res_CTSB <- run_lmem(
 )
 
 # ---- 4.2 Cognitive outcomes: include Education covariate ----
-res_DSST <- run_lmem(
-  outcome = "DSST_correct",
-  add_education = TRUE,
-  do_posthoc_interaction = FALSE,  # set TRUE only if Group×Time is significant
-  do_within_group = FALSE,         # optional; many papers only do post-hoc if interaction significant
-  p_adjust = "holm"
-)
 
 res_NBACC <- run_lmem(
   outcome = "NBACC_trials",
@@ -273,14 +263,6 @@ res_NBmeanRT <- run_lmem(
 
 res_SimonEffect <- run_lmem(
   outcome = "SimonEffect",
-  add_education = TRUE,
-  do_posthoc_interaction = FALSE,
-  do_within_group = FALSE,
-  p_adjust = "holm"
-)
-
-res_ConflictEffect <- run_lmem(
-  outcome = "ConflictEffect",
   add_education = TRUE,
   do_posthoc_interaction = FALSE,
   do_within_group = FALSE,
@@ -546,4 +528,5 @@ cognitive_outcomes <- c("DeltaCE", "DeltaSE",
 
 # Run the models for all outcomes
 moderation_models <- lapply(cognitive_outcomes, run_moderation_analysis)
+
 
