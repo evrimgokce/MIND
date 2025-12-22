@@ -44,14 +44,16 @@ print(missing_data)
 
 # 2) Baseline Participant Characteristics by group
 
-# Ensure Group variable is categorical
-Data$Group <- as.factor(Data$Group)
+Data$Group <- factor(Data$Group,
+                     levels = c(0, 1, 2),
+                     labels = c("cogT", "motT", "DTT"))
 
-# Count the number of participants by Group and Sex
-sex_distribution <- Data %>%
-  group_by(Group, Sex) %>%
-  summarise(Count = n(), .groups = "drop") %>%
-  mutate(Percentage = Count / sum(Count) * 100)
+Data$Time  <- factor(Data$Time,
+                     levels = c(1, 2),
+                     labels = c("pre", "post"))
+
+Data$Sex <- factor(Data$Sex)   # keep as factor (your model uses Sex as categorical)
+
 
 # Display results
 print(sex_distribution)
@@ -158,36 +160,132 @@ print(Data_wide)
 
 # 4) Linear Mixed Model for Myokines and Cognitive Outcomes
 
-# 4.1 Function to run LMEM for Myokines (without Education)
-run_lme_myokine <- function(outcome) {
-  model_formula <- as.formula(paste(outcome, "~ Group * Time + Age + Sex + (1 | ID)"))
-  model <- lmer(model_formula, data = Data, REML = FALSE)
+# 4) Linear Mixed Model for Myokines and Cognitive Outcomes
+
+# ---- Helper: run LMEM + Type III ANOVA + EMMs + (optional) post-hoc contrasts ----
+run_lmem <- function(outcome,
+                     add_education = FALSE,
+                     do_posthoc_interaction = TRUE,
+                     do_within_group = TRUE,
+                     p_adjust = "holm") {
+
+  # Build model formula
+  fixed_terms <- if (add_education) {
+    "Group * Time + Age + Sex + Education"
+  } else {
+    "Group * Time + Age + Sex"
+  }
+
+  model_formula <- as.formula(paste(outcome, "~", fixed_terms, "+ (1 | ID)"))
+
+  # Fit model (ML), keep NA rows excluded but preserve alignment for residuals/preds
+  model <- lmer(
+    model_formula,
+    data = Data,
+    REML = FALSE,
+    na.action = na.exclude
+  )
+
+  cat("\n=================================================\n")
+  cat("Outcome:", outcome, "\n")
+  cat("Model:", deparse(model_formula), "\n")
+  cat("=================================================\n\n")
+
+  # Model summary + Type III ANOVA
   print(summary(model))
-  print(anova(model, type = "III"))
-  print(emmeans(model, pairwise ~ Time | Group, adjust = "bonferroni"))
-  return(model)
+  cat("\n--- Type III ANOVA (Satterthwaite) ---\n")
+  print(anova(model, type = 3))
+
+  # Estimated marginal means for Group x Time cells
+  cat("\n--- Estimated marginal means (Group x Time) ---\n")
+  emm <- emmeans(model, ~ Group * Time)
+  print(emm)
+
+  # (A) Within-group change: post - pre for each group
+  if (do_within_group) {
+    cat("\n--- Within-group change (post - pre) ---\n")
+    chg <- contrast(emm, method = "revpairwise", by = "Group")
+    print(summary(chg, infer = TRUE, adjust = p_adjust))
+  } else {
+    chg <- NULL
+  }
+
+  # (B) Interaction (pairwise interaction contrasts):
+  # Compare the (post-pre) changes BETWEEN groups
+  # Only meaningful if you want group-vs-group differences in change
+  if (do_posthoc_interaction) {
+    cat("\n--- Pairwise interaction contrasts: differences in change scores ---\n")
+    if (is.null(chg)) {
+      chg <- contrast(emm, method = "revpairwise", by = "Group")
+    }
+    int_contr <- contrast(chg, method = "pairwise", by = NULL)  # key: by = NULL
+    print(summary(int_contr, infer = TRUE, adjust = p_adjust))
+  }
+
+  invisible(list(model = model, emm = emm))
 }
 
-# 4.2. Function to run LMEM for Cognitive Measures (with Education)
-run_lme_cognitive <- function(outcome) {
-  model_formula <- as.formula(paste(outcome, "~ Group * Time + Age + Sex + Education + (1 | ID)"))
-  model <- lmer(model_formula, data = Data, REML = FALSE)
-  print(summary(model))
-  print(anova(model, type = "III"))
-  print(emmeans(model, pairwise ~ Time | Group, adjust = "bonferroni"))
-  return(model)
-}
+# ---- 4.1 Myokines (BDNF, CTSB): no Education covariate ----
+# NOTE: For BDNF you likely want both within-group and interaction contrasts.
+# For CTSB you can keep within-group on (optional), and turn off interaction contrasts
+# if Group:Time is not significant.
 
-# Run LMEM for Myokines 
-model_BDNF <- run_lme_myokine("BDNF")
-model_CTSB <- run_lme_myokine("CTSB")
+res_BDNF <- run_lmem(
+  outcome = "BDNF",
+  add_education = FALSE,
+  do_posthoc_interaction = TRUE,  # because Group×Time was significant for BDNF
+  do_within_group = TRUE,
+  p_adjust = "holm"
+)
 
-# Run LMEM for Cognitive Measures 
-model_DSST <- run_lme_cognitive("DSST_correct")
-model_NBACC <- run_lme_cognitive("NBACC_trials")
-model_NBmeanRT <- run_lme_cognitive("NBmeanRT_correct_trials")
-model_SimonEffect <- run_lme_cognitive("SimonEffect")
-model_ConflictEffect <- run_lme_cognitive("ConflictEffect")
+res_CTSB <- run_lmem(
+  outcome = "CTSB",
+  add_education = FALSE,
+  do_posthoc_interaction = FALSE, # set TRUE only if Group×Time is significant
+  do_within_group = TRUE,         # optional (physiology may still be of interest)
+  p_adjust = "holm"
+)
+
+# ---- 4.2 Cognitive outcomes: include Education covariate ----
+res_DSST <- run_lmem(
+  outcome = "DSST_correct",
+  add_education = TRUE,
+  do_posthoc_interaction = FALSE,  # set TRUE only if Group×Time is significant
+  do_within_group = FALSE,         # optional; many papers only do post-hoc if interaction significant
+  p_adjust = "holm"
+)
+
+res_NBACC <- run_lmem(
+  outcome = "NBACC_trials",
+  add_education = TRUE,
+  do_posthoc_interaction = FALSE,
+  do_within_group = FALSE,
+  p_adjust = "holm"
+)
+
+res_NBmeanRT <- run_lmem(
+  outcome = "NBmeanRT_correct_trials",
+  add_education = TRUE,
+  do_posthoc_interaction = FALSE,
+  do_within_group = FALSE,
+  p_adjust = "holm"
+)
+
+res_SimonEffect <- run_lmem(
+  outcome = "SimonEffect",
+  add_education = TRUE,
+  do_posthoc_interaction = FALSE,
+  do_within_group = FALSE,
+  p_adjust = "holm"
+)
+
+res_ConflictEffect <- run_lmem(
+  outcome = "ConflictEffect",
+  add_education = TRUE,
+  do_posthoc_interaction = FALSE,
+  do_within_group = FALSE,
+  p_adjust = "holm"
+)
 
 # 4.3. Function to check assumptions after LMEM
 check_lme_assumptions <- function(model) {
@@ -241,35 +339,47 @@ model_no_outliers <- lmer(Variable ~ Group * Time + Age + Sex + (1 | ID), data =
 # Display model summary
 summary(model_no_outliers)
 
-
 # 5) Visualization 
-# 5.1. Boxplots for BDNF and CTSB
 
-# Function to create barplots
-ggplot(summary_data, aes(x = Group, y = mean_BDNF, fill = Time)) +
-  geom_bar(stat = "identity", position = position_dodge(width = 0.7), width = 0.7) +
+# 5.1. Bar plot for BDNF based on LMEM estimated marginal means (EMMs)
+
+# Convert emmeans object to data frame
+emm_df <- as.data.frame(emm)
+
+ggplot(emm_df, aes(x = Group, y = emmean, fill = Time)) +
+  geom_bar(
+    stat = "identity",
+    position = position_dodge(width = 0.7),
+    width = 0.65,
+    color = "black"
+  ) +
   geom_errorbar(
-    aes(ymin = mean_BDNF - sem_BDNF, ymax = mean_BDNF + sem_BDNF),
+    aes(ymin = emmean - SE, ymax = emmean + SE),
     position = position_dodge(width = 0.7),
     width = 0.2
   ) +
-  geom_segment(aes(x = 2.95, xend = 3.15, y = 6700, yend = 6700)) +  # çizgi
-  annotate("text", x = 3, y = 7000, label = "* p = 0.02", size = 5) +  # p-value
+  # Interaction annotation (adjust x/y if needed)
+  annotate("segment", x = 2.80, xend = 3.15, y = 6500, yend = 6500) +
+  annotate("text", x = 2.92, y = 6800, label = "* p = .02", size = 5) +
   labs(
     x = "",
-    y = "BDNF (pg/ml)",
+    y = "BDNF (pg/mL)",
     fill = "Time"
   ) +
   scale_fill_manual(values = c("gray70", "lightpink")) +
+  theme_classic(base_size = 14) +
   theme(
-    panel.background = element_rect(fill = "white", colour = NA),       # white background
-    panel.grid.major = element_blank(),  # no grids
-    panel.grid.minor = element_blank(),
-    axis.line = element_line(color = "black"),  
-    axis.ticks = element_line(color = "black"), 
-    text = element_text(size = 14)
+    axis.text.x = element_text(size = 14),   # group labels only
+    axis.text.y = element_text(size = 12)
   )
 
+# Save figure
+ggsave(
+  filename = "Figure_BDNF.png",
+  width = 8,
+  height = 6,
+  dpi = 300
+)
 
 # 5.2. Line plots for cognitive outcomes
 
@@ -436,3 +546,4 @@ cognitive_outcomes <- c("DeltaCE", "DeltaSE",
 
 # Run the models for all outcomes
 moderation_models <- lapply(cognitive_outcomes, run_moderation_analysis)
+
