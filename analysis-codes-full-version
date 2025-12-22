@@ -30,6 +30,8 @@ library(ggplot2)
 library(MASS)
 library(sjPlot)
 library(effectsize)
+library(tidyr)
+
 
 # Read the dataset
 Data <- read_excel("DATA-Germen.xlsx", sheet = "Sheet1")
@@ -59,39 +61,37 @@ Data$Sex <- factor(Data$Sex)   # keep as factor (your model uses Sex as categori
 print(sex_distribution)
 
 # Outlier analysis
-variables <- c("BDNF", "CTSB", "DSST_correct", 
+variables <- c("BDNF", "CTSB",
                "NBmeanRT_correct_trials", "NBACC_trials",
-               "ConflictEffect", "SimonEffect")
+               "SimonEffect")
 
-times <- c(1, 2)  # pre (1), post (2)
+for (var in variables) {
+  for (tm in levels(Data$Time)) {
 
-for(var in variables) {
-  for(t in times) {
-    
-    # Extract the data as a vector directly
-    data_subset <- Data[[var]][Data$Time == levels(Data$Time)[t]]
+    data_subset <- Data %>%
+      dplyr::select(ID, Time, all_of(var)) %>%
+      dplyr::filter(Time == tm) %>%
+      dplyr::rename(value = all_of(var))
 
-    # Calculate Interquartile Range (IQR)
-    Q1 <- quantile(data_subset, 0.25, na.rm = TRUE)
-    Q3 <- quantile(data_subset, 0.75, na.rm = TRUE)
+    x <- data_subset$value
+
+    Q1 <- quantile(x, 0.25, na.rm = TRUE)
+    Q3 <- quantile(x, 0.75, na.rm = TRUE)
     IQR_val <- Q3 - Q1
-    
-    # Determine outlier thresholds
+
     lower_bound <- Q1 - 1.5 * IQR_val
     upper_bound <- Q3 + 1.5 * IQR_val
-    
-    # Identify outliers
-    outlier_idx <- which(data_subset < lower_bound | data_subset > upper_bound)
-    outlier_values <- data_subset[outlier_idx]
-    
-    # Display results
-    cat("\nOutlier Analysis for", var, "(Time =", ifelse(t == 1, "Pre", "Post"), "):\n")
-    if(length(outlier_idx) > 0){
-      cat("Number of Outliers:", length(outlier_idx), "\n")
-      cat("Outlier indices in subset:", outlier_idx, "\n")
-      cat("Outlier values:", outlier_values, "\n")
+
+    outliers <- data_subset %>%
+      dplyr::filter(!is.na(value) & (value < lower_bound | value > upper_bound))
+
+    cat("\nOutlier screening:", var, "| Time =", tm, "\n")
+    if (nrow(outliers) > 0) {
+      cat("N extreme values:", nrow(outliers), "\n")
+      print(outliers)
+      cat("Bounds:", lower_bound, "to", upper_bound, "\n")
     } else {
-      cat("No outliers detected.\n")
+      cat("No extreme values detected.\n")
     }
   }
 }
@@ -304,20 +304,46 @@ check_lme_assumptions(res_NBmeanRT$model)
 check_lme_assumptions(res_SimonEffect$model)
 
 # 4.5. Compare results with and without outliers
-# Fit the model and calculate residuals
-model <- lmer(Variable ~ Group * Time + Age + Sex + (1 | ID), data = DATA_Germen)
-res <- residuals(model)
-abs_res <- abs(res)
-# Determine outlier threshold (mean + 2*SD)
-threshold <- mean(abs_res) + 2 * sd(abs_res)
-# Identify outlier observations
-all_outliers <- which(abs_res > threshold)
-# Create dataset excluding outliers
-DATA_no_outliers <- DATA_Germen[-all_outliers, ]
-# Fit the model without outliers
-model_no_outliers <- lmer(Variable ~ Group * Time + Age + Sex + (1 | ID), data = DATA_no_outliers)
-# Display model summary
-summary(model_no_outliers)
+sensitivity_outlier_check <- function(outcome, add_education = FALSE) {
+
+  fixed_terms <- if (add_education) {
+    "Group * Time + Age + Sex + Education"
+  } else {
+    "Group * Time + Age + Sex"
+  }
+
+  fml <- as.formula(paste(outcome, "~", fixed_terms, "+ (1|ID)"))
+
+  m_full <- lmer(fml, data = Data, REML = FALSE, na.action = na.exclude)
+
+  # standardized residuals
+  r <- resid(m_full)
+  r_std <- as.numeric(scale(r))
+
+  # threshold = |z| > 2 (common sensitivity rule)
+  keep_idx <- which(abs(r_std) <= 2)
+  Data_trim <- Data[keep_idx, ]
+
+  m_trim <- lmer(fml, data = Data_trim, REML = FALSE, na.action = na.exclude)
+
+  cat("\n=================================================\n")
+  cat("Sensitivity (outlier) check for:", outcome, "\n")
+  cat("Full model n =", nrow(model.frame(m_full)), "\n")
+  cat("Trim model n =", nrow(model.frame(m_trim)), "\n")
+  cat("-------------------------------------------------\n")
+  cat("Full model Group:Time p = ",
+      anova(m_full, type = 3)["Group:Time", "Pr(>F)"], "\n")
+  cat("Trim model Group:Time p = ",
+      anova(m_trim, type = 3)["Group:Time", "Pr(>F)"], "\n")
+  cat("=================================================\n")
+
+  invisible(list(full = m_full, trimmed = m_trim))
+}
+
+# Example runs:
+sens_BDNF <- sensitivity_outlier_check("BDNF", add_education = FALSE)
+sens_CTSB <- sensitivity_outlier_check("CTSB", add_education = FALSE)
+
 
 # 5) Visualization 
 
@@ -407,32 +433,20 @@ plot_emm_bar <- function(emm_obj, ylab, p_label = NULL, p_x = NULL, p_y = NULL) 
 }
 
 # Simon Effect figure 
-p_Simon <- plot_emm_bar(
-  emm_obj = emm_Simon,
-  ylab = "Simon Effect (ms)"
-)
+p_Simon <- plot_emm_bar(res_SimonEffect$emm, "Simon Effect (ms)")
 
 ggsave("Figure_SimonEffect.png", p_Simon, width = 8, height = 6, dpi = 300)
 
 # N-back Accuracy figure 
-p_NbackAcc <- plot_emm_bar(
-  emm_obj = emm_Nback,
-  ylab = "N-back Accuracy (%)"
-)
+p_NbackAcc <- plot_emm_bar(res_NBACC$emm, "N-back Accuracy (%)")
 
 ggsave("Figure_NbackAcc.png", p_NbackAcc, width = 8, height = 6, dpi = 300)
 
-# N-back mean Reactio Time figure 
-p_NBmeanRT <- plot_emm_bar(
-  emm_obj = emm_Nback,
-  ylab = "N-back RT (ms)"
-)
+# N-back mean Reaction Time figure 
+p_NBmeanRT <- plot_emm_bar(res_NBmeanRT$emm, "N-back mean RT (ms)")
 
 ggsave("Figure_NBmeanRT.png", p_NbackAcc, width = 8, height = 6, dpi = 300)
-print(combined)
 
-install.packages("gridExtra")
-library(gridExtra)
 
 # p_Nback  -> Accuracy plot (up)
 # p_NBmeanRT     -> RT plot (down)
@@ -451,6 +465,7 @@ ggsave(
   plot = combined,
   width = 8, height = 12, dpi = 300
 )
+
 
 
 
