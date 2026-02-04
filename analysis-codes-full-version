@@ -3,349 +3,233 @@
 author: "EG"
 date: "14-03-2025"
 
-# 1) Data set-up and management
+head(DATA_Germen)
 
-# Load Packages
-install.packages("readxl")
-install.packages("plyr")
-install.packages("lme4")
-install.packages("nlme")
-install.packages("emmeans")
-install.packages("robustlmm")
-install.packages("dplyr")
-install.packages("ggplot2")
-install.packages("MASS")
-install.packages("sjPlot")
-install.packages("effectsize")
-
-library(readxl)
-library(lmerTest)
-library(plyr)
-library(lme4)
-library(nlme)
-library(emmeans)
-library(robustlmm)
+#  1) Packages 
 library(dplyr)
-library(ggplot2)
-library(MASS)
-library(sjPlot)
-library(effectsize)
 library(tidyr)
+library(lme4)
+library(lmerTest)  # p-values / Satterthwaite
+library(emmeans)
+library(ggplot2)
+library(readxl)
+Data <- DATA_Germen
 
-
-# Read the dataset
-Data <- read_excel("DATA-Germen.xlsx", sheet = "Sheet1")
-
-# Check data structure
 str(Data)
 summary(Data)
 
-# Calculate missing data percentage
-missing_data <- colSums(is.na(Data)) / nrow(Data) * 100
-print(missing_data)
 
-# 2) Baseline Participant Characteristics by group
+# 2) Recode / factor setup
 
-Data$Group <- factor(Data$Group,
-                     levels = c(0, 1, 2),
-                     labels = c("cogT", "motT", "DTT"))
+Data <- Data %>%
+  mutate(
+    ID    = factor(ID),
+    Group = factor(Group, levels = c(0, 1, 2), labels = c("cogT", "motT", "DTT")),
+    Time  = factor(Time,  levels = c(1, 2), labels = c("pre", "post")),
+    Sex   = factor(Sex)
+  )
 
-Data$Time  <- factor(Data$Time,
-                     levels = c(1, 2),
-                     labels = c("pre", "post"))
+# Sanity checks
+table(Data$Group, Data$Time, useNA="ifany")
+table(Data$Sex, useNA="ifany")
+length(unique(Data$ID))
 
-Data$Sex <- factor(Data$Sex)   # keep as factor (your model uses Sex as categorical)
+# 3) Missingness report 
 
+missing_pct <- sort(colSums(is.na(Data)) / nrow(Data) * 100, decreasing = TRUE)
+missing_pct
 
-# Display results
-print(sex_distribution)
+# 4) Baseline table (Pre)
 
-# Outlier analysis
-variables <- c("BDNF", "CTSB",
-               "NBmeanRT_correct_trials", "NBACC_trials",
-               "SimonEffect")
+Data_pre <- Data %>% filter(Time == "pre")
 
-for (var in variables) {
-  for (tm in levels(Data$Time)) {
-
-    data_subset <- Data %>%
-      dplyr::select(ID, Time, all_of(var)) %>%
-      dplyr::filter(Time == tm) %>%
-      dplyr::rename(value = all_of(var))
-
-    x <- data_subset$value
-
-    Q1 <- quantile(x, 0.25, na.rm = TRUE)
-    Q3 <- quantile(x, 0.75, na.rm = TRUE)
-    IQR_val <- Q3 - Q1
-
-    lower_bound <- Q1 - 1.5 * IQR_val
-    upper_bound <- Q3 + 1.5 * IQR_val
-
-    outliers <- data_subset %>%
-      dplyr::filter(!is.na(value) & (value < lower_bound | value > upper_bound))
-
-    cat("\nOutlier screening:", var, "| Time =", tm, "\n")
-    if (nrow(outliers) > 0) {
-      cat("N extreme values:", nrow(outliers), "\n")
-      print(outliers)
-      cat("Bounds:", lower_bound, "to", upper_bound, "\n")
-    } else {
-      cat("No extreme values detected.\n")
-    }
-  }
-}
-
-
-# Function to calculate Mean and SE
-mean_se <- function(x) {
-  n <- sum(!is.na(x))
-  mean_value <- mean(x, na.rm = TRUE)
-  se_value <- sd(x, na.rm = TRUE) / sqrt(n)
-  return(c(Mean = mean_value, SE = se_value))
-}
-
-# Compute mean and SE for each numeric variable and show variable names
-baseline_stats <- Data %>%
+baseline_tbl <- Data_pre %>%
   group_by(Group) %>%
   summarise(
-    across(
-      .cols = c(Age, Education, STACC_con_trials, STACC_incon_trials, ConflictEffect, 
-                STmeanRT_correct_trials, NBmeanRT_correct_target_trials, NBmeanRT_correct_nontarget_trials, 
-                NBmedianRT_correct_target_trials, NBmedianRT_correct_nontarget_trials, 
-                NBsdRT_correct_target_trials, NBsdRT_correct_nontarget_trials, 
-                DSST_correct, DSST_error, CTSB, BDNF), 
-      .fns = mean_se, 
-      .names = "{.col}_mean_se"
-    )
+    n = n_distinct(ID),
+    Age_mean = mean(Age, na.rm=TRUE),
+    Age_sd   = sd(Age, na.rm=TRUE),
+    Education_mean = mean(Education, na.rm=TRUE),
+    Education_sd   = sd(Education, na.rm=TRUE),
+    # If Sex labels are female/male:
+    Female_n = sum(Sex == "female", na.rm=TRUE),
+    Male_n   = sum(Sex == "male", na.rm=TRUE),
+    .groups = "drop"
   )
 
-# Display results
-print(baseline_stats)
+baseline_tbl
 
-# 3) Reshape the data to bring pre and post values together
-Data_wide <- Data %>%
-  pivot_wider(names_from = Time, values_from = c(BDNF, CTSB, Age, Education, 
-                                                 STACC_con_trials, STACC_incon_trials, 
-                                                 ConflictEffect, STmeanRT_correct_trials, 
-                                                 NBmeanRT_correct_target_trials, 
-                                                 NBmeanRT_correct_nontarget_trials, 
-                                                 NBmedianRT_correct_target_trials, 
-                                                 NBmedianRT_correct_nontarget_trials, 
-                                                 NBsdRT_correct_target_trials, 
-                                                 NBsdRT_correct_nontarget_trials, 
-                                                 DSST_correct, DSST_error))
 
-# Compute delta values (Post - Pre)
-Data_wide <- Data_wide %>%
-  mutate(
-    DeltaBDNF = BDNF_2 - BDNF_1,
-    DeltaCTSB = CTSB_2 - CTSB_1,
-    DeltaSTACC_con = STACC_con_trials_2 - STACC_con_trials_1,
-    DeltaSTACC_incon = STACC_incon_trials_2 - STACC_incon_trials_1,
-    DeltaConflictEffect = ConflictEffect_2 - ConflictEffect_1,
-    DeltaSTmeanRT = STmeanRT_correct_trials_2 - STmeanRT_correct_trials_1,
-    DeltaNBmeanRT_target = NBmeanRT_correct_target_trials_2 - NBmeanRT_correct_target_trials_1,
-    DeltaNBmeanRT_nontarget = NBmeanRT_correct_nontarget_trials_2 - NBmeanRT_correct_nontarget_trials_1,
-    DeltaNBmedianRT_target = NBmedianRT_correct_target_trials_2 - NBmedianRT_correct_target_trials_1,
-    DeltaNBmedianRT_nontarget = NBmedianRT_correct_nontarget_trials_2 - NBmedianRT_correct_nontarget_trials_1,
-    DeltaNBsdRT_target = NBsdRT_correct_target_trials_2 - NBsdRT_correct_target_trials_1,
-    DeltaNBsdRT_nontarget = NBsdRT_correct_nontarget_trials_2 - NBsdRT_correct_nontarget_trials_1,
-    DeltaDSST_correct = DSST_correct_2 - DSST_correct_1,
-    DeltaDSST_error = DSST_error_2 - DSST_error_1
-  )
+#5)  Outlier screening 
 
-# Print the updated dataset with delta variables
-print(Data_wide)
+outcome_list <- c("BDNF", "CTSB", "SimonEffect", "NBACC_trials", "NBmeanRT_correct_trials")
 
-# 4) Linear Mixed Model for Myokines and Cognitive Outcomes
-
-run_lmem <- function(outcome,
-                     add_education = FALSE,
-                     do_posthoc_interaction = TRUE,
-                     do_within_group = TRUE,
-                     p_adjust = "holm") {
-
-  # Build model formula
-  fixed_terms <- if (add_education) {
-    "Group * Time + Age + Sex + Education"
-  } else {
-    "Group * Time + Age + Sex"
+screen_outliers_iqr <- function(df, var) {
+  for (tm in levels(df$Time)) {
+    x <- df %>% filter(Time == tm) %>% pull({{var}})
+    Q1 <- quantile(x, 0.25, na.rm=TRUE)
+    Q3 <- quantile(x, 0.75, na.rm=TRUE)
+    IQRv <- Q3 - Q1
+    lb <- Q1 - 1.5 * IQRv
+    ub <- Q3 + 1.5 * IQRv
+    
+    out <- df %>%
+      filter(Time == tm) %>%
+      select(ID, Group, Time, value = {{var}}) %>%
+      filter(!is.na(value) & (value < lb | value > ub))
+    
+    cat("\n--- IQR outlier screen:", deparse(substitute(var)), "| Time =", tm, "---\n")
+    cat("Bounds:", lb, "to", ub, "\n")
+    if (nrow(out) == 0) cat("No extreme values detected.\n")
+    if (nrow(out) > 0) print(out)
   }
+}
 
-  model_formula <- as.formula(paste(outcome, "~", fixed_terms, "+ (1 | ID)"))
+# Run screens (optional)
+# screen_outliers_iqr(Data, BDNF)
+# screen_outliers_iqr(Data, CTSB)
+# screen_outliers_iqr(Data, SimonEffect)
+# screen_outliers_iqr(Data, NBACC_trials)
+# screen_outliers_iqr(Data, NBmeanRT_correct_trials)
 
-  # Fit model (ML), keep NA rows excluded but preserve alignment for residuals/preds
-  model <- lmer(
-    model_formula,
-    data = Data,
-    REML = FALSE,
-    na.action = na.exclude
-  )
 
-  cat("\n=================================================\n")
+# 6) LMEM function 
+#    - tests Group×Time
+#    - returns EMMs
+#    - within-group change (post-pre)  
+#    - BETWEEN-group differences in change (interaction contrasts) 
+
+run_lmm <- function(outcome, add_education = FALSE, p_adjust = "holm") {
+  
+  fixed_terms <- if (add_education) {
+    "Group*Time + Age + Sex + Education"
+  } else {
+    "Group*Time + Age + Sex"
+  }
+  
+  fml <- as.formula(paste0(outcome, " ~ ", fixed_terms, " + (1|ID)"))
+  
+  m <- lmer(fml, data = Data, REML = FALSE, na.action = na.exclude)
+  
+  cat("\n====================================================\n")
   cat("Outcome:", outcome, "\n")
-  cat("Model:", deparse(model_formula), "\n")
-  cat("=================================================\n\n")
-
-  # Model summary + Type III ANOVA
-  print(summary(model))
-  cat("\n--- Type III ANOVA (Satterthwaite) ---\n")
-  print(anova(model, type = 3))
-
-  # Estimated marginal means for Group x Time cells
-  cat("\n--- Estimated marginal means (Group x Time) ---\n")
-  emm <- emmeans(model, ~ Group * Time)
+  cat("Model:", deparse(fml), "\n")
+  cat("====================================================\n")
+  
+  # Type III tests
+  an3 <- anova(m, type = 3)
+  print(an3)
+  
+  # Estimated marginal means
+  emm <- emmeans(m, ~ Group*Time)
+  cat("\n--- EMMs (Group x Time) ---\n")
   print(emm)
-
-  # (A) Within-group change: post - pre for each group
-  if (do_within_group) {
-    cat("\n--- Within-group change (post - pre) ---\n")
-    chg <- contrast(emm, method = "revpairwise", by = "Group")
-    print(summary(chg, infer = TRUE, adjust = p_adjust))
-  } else {
-    chg <- NULL
-  }
-
-  # (B) Interaction (pairwise interaction contrasts):
-  # Compare the (post-pre) changes BETWEEN groups
-  # Only meaningful if you want group-vs-group differences in change
-  if (do_posthoc_interaction) {
-    cat("\n--- Pairwise interaction contrasts: differences in change scores ---\n")
-    if (is.null(chg)) {
-      chg <- contrast(emm, method = "revpairwise", by = "Group")
-    }
-    int_contr <- contrast(chg, method = "pairwise", by = NULL)  # key: by = NULL
-    print(summary(int_contr, infer = TRUE, adjust = p_adjust))
-  }
-
- invisible(list(model = model, emm = emm, chg = chg, int_contr = if (exists("int_contr")) int_contr else NULL))
+  
+  # Within-group changes: post - pre
+  chg <- contrast(emm, method = "revpairwise", by = "Group")
+  chg_sum <- summary(chg, infer=TRUE, adjust=p_adjust)
+  cat("\n--- Within-group change (post - pre) ---\n")
+  print(chg_sum)
+  
+  # Interaction contrasts (difference in change between groups) ✅
+  int <- contrast(chg, method = "pairwise", by = NULL)
+  int_sum <- summary(int, infer=TRUE, adjust=p_adjust)
+  cat("\n--- Between-group differences in change (interaction contrasts) ---\n")
+  print(int_sum)
+  
+  invisible(list(model=m, anova=an3, emm=emm, chg=chg_sum, int=int_sum))
 }
 
-# ---- 4.1 Myokines (BDNF, CTSB): no Education covariate ----
-# NOTE: For BDNF you likely want both within-group and interaction contrasts.
-# For CTSB you can keep within-group on (optional), and turn off interaction contrasts
-# if Group:Time is not significant.
+# 7) Run models 
 
-res_BDNF <- run_lmem(
-  outcome = "BDNF",
-  add_education = FALSE,
-  do_posthoc_interaction = TRUE,  # because Group×Time was significant for BDNF
-  do_within_group = TRUE,
-  p_adjust = "holm"
-)
+# Myokines
+res_BDNF <- run_lmm("BDNF", add_education = FALSE, p_adjust = "tukey")
+res_CTSB <- run_lmm("CTSB", add_education = FALSE, p_adjust = "tukey")
 
-res_CTSB <- run_lmem(
-  outcome = "CTSB",
-  add_education = FALSE,
-  do_posthoc_interaction = FALSE, # set TRUE only if Group×Time is significant
-  do_within_group = TRUE,         # optional (physiology may still be of interest)
-  p_adjust = "holm"
-)
+# Cognition
+res_Simon <- run_lmm("SimonEffect", add_education = TRUE, p_adjust = "tukey")
+res_NBacc <- run_lmm("NBACC_trials", add_education = TRUE, p_adjust = "tukey")
+res_NBrt  <- run_lmm("NBmeanRT_correct_trials", add_education = TRUE, p_adjust = "tukey")
 
-# ---- 4.2 Cognitive outcomes: include Education covariate ----
+# 8) Model diagnostics
 
-res_NBACC <- run_lmem(
-  outcome = "NBACC_trials",
-  add_education = TRUE,
-  do_posthoc_interaction = FALSE,
-  do_within_group = FALSE,
-  p_adjust = "holm"
-)
-
-res_NBmeanRT <- run_lmem(
-  outcome = "NBmeanRT_correct_trials",
-  add_education = TRUE,
-  do_posthoc_interaction = FALSE,
-  do_within_group = FALSE,
-  p_adjust = "holm"
-)
-
-res_SimonEffect <- run_lmem(
-  outcome = "SimonEffect",
-  add_education = TRUE,
-  do_posthoc_interaction = FALSE,
-  do_within_group = FALSE,
-  p_adjust = "holm"
-)
-
-# 4.3. Function to check assumptions after LMEM
-check_lme_assumptions <- function(model) {
-  # 1) Linearity & Homoscedasticity: Residual vs. Fitted plot
-  plot(model, resid(.) ~ fitted(.), main = "Residuals vs. Fitted") 
-  
-  # 2) Normality of Residuals: QQ-plot
-  qqnorm(resid(model))
-  qqline(resid(model), col = "red", lwd = 2)
-  
-  # 3) Homoscedasticity: Scale-location plot
-  plot(model, sqrt(abs(resid(.))) ~ fitted(.), main = "Scale-Location")
-  
-  # 4) Histogram of Residuals
-  hist(resid(model), main = "Histogram of Residuals", col = "lightblue", breaks = 20)
-  
-  # 5) Random Effects Normality Check
-  ranef_data <- ranef(model)$ID
-  qqnorm(ranef_data[,1], main = "QQ Plot for Random Effects")
-  qqline(ranef_data[,1], col = "red", lwd = 2)
-  
-  # 6) Multicollinearity Check (VIF)
-  library(car)
-  vif_values <- vif(model)
-  print("Variance Inflation Factors (VIF):")
-  print(vif_values)
-  
+check_diagnostics <- function(m, outcome_name="") {
+  par(mfrow=c(2,2))
+  plot(m, resid(.) ~ fitted(.), main=paste0(outcome_name, ": Resid vs Fitted"))
+  qqnorm(resid(m), main=paste0(outcome_name, ": QQ Residuals"))
+  qqline(resid(m))
+  hist(resid(m), main=paste0(outcome_name, ": Residuals"), xlab="Residuals")
+  plot(fitted(m), sqrt(abs(resid(m))), main=paste0(outcome_name, ": Scale-Location"),
+       xlab="Fitted", ylab="sqrt(|resid|)")
+  par(mfrow=c(1,1))
 }
-# 4.4. Apply assumption checks after each LMEM
-check_lme_assumptions(res_BDNF$model)
-check_lme_assumptions(res_CTSB$model)
-check_lme_assumptions(res_NBACC$model)
-check_lme_assumptions(res_NBmeanRT$model)
-check_lme_assumptions(res_SimonEffect$model)
 
-# 4.5. Compare results with and without outliers
-sensitivity_outlier_check <- function(outcome, add_education = FALSE) {
+check_diagnostics(res_BDNF$model, "BDNF")
+check_diagnostics(res_CTSB$model, "CTSB")
+check_diagnostics(res_Simon$model, "SimonEffect")
+check_diagnostics(res_NBacc$model, "NBACC_trials")
+check_diagnostics(res_NBrt$model, "NBmeanRT_correct_trials")
 
+# 9) Visualization using EMMs 
+
+plot_emm <- function(emm_obj, ylab) {
+  df <- as.data.frame(emm_obj)
+  ggplot(df, aes(x=Group, y=emmean, shape=Time, group=Time)) +
+    geom_point(position=position_dodge(width=0.2), size=3) +
+    geom_errorbar(aes(ymin=emmean-SE, ymax=emmean+SE),
+                  position=position_dodge(width=0.2), width=0.15) +
+    labs(x="", y=ylab, shape="Time") +
+    theme_classic(base_size=14)
+}
+
+p_BDNF  <- plot_emm(res_BDNF$emm, "BDNF (pg/mL)")
+p_CTSB  <- plot_emm(res_CTSB$emm, "CTSB")
+p_Simon <- plot_emm(res_Simon$emm, "Simon Effect (ms)")
+p_NBacc <- plot_emm(res_NBacc$emm, "N-back Accuracy (%)")
+p_NBrt  <- plot_emm(res_NBrt$emm, "N-back mean RT (ms)")
+
+p_BDNF
+p_CTSB
+p_Simon 
+p_NBacc
+p_NBrt
+
+# 10) sensitivity analysis 
+
+sensitivity_trim_resid <- function(outcome, add_education = FALSE) {
   fixed_terms <- if (add_education) {
-    "Group * Time + Age + Sex + Education"
+    "Group*Time + Age + Sex + Education"
   } else {
-    "Group * Time + Age + Sex"
+    "Group*Time + Age + Sex"
   }
-
-  fml <- as.formula(paste(outcome, "~", fixed_terms, "+ (1|ID)"))
-
-  m_full <- lmer(fml, data = Data, REML = FALSE, na.action = na.exclude)
-
-  # standardized residuals
+  fml <- as.formula(paste0(outcome, " ~ ", fixed_terms, " + (1|ID)"))
+  m_full <- lmer(fml, data=Data, REML=FALSE, na.action=na.exclude)
+  
   r <- resid(m_full)
   r_std <- as.numeric(scale(r))
-
-  # threshold = |z| > 2 (common sensitivity rule)
-  keep_idx <- which(abs(r_std) <= 2)
-  Data_trim <- Data[keep_idx, ]
-
-  m_trim <- lmer(fml, data = Data_trim, REML = FALSE, na.action = na.exclude)
-
-  cat("\n=================================================\n")
-  cat("Sensitivity (outlier) check for:", outcome, "\n")
-  cat("Full model n =", nrow(model.frame(m_full)), "\n")
-  cat("Trim model n =", nrow(model.frame(m_trim)), "\n")
-  cat("-------------------------------------------------\n")
-  cat("Full model Group:Time p = ",
-      anova(m_full, type = 3)["Group:Time", "Pr(>F)"], "\n")
-  cat("Trim model Group:Time p = ",
-      anova(m_trim, type = 3)["Group:Time", "Pr(>F)"], "\n")
-  cat("=================================================\n")
-
-  invisible(list(full = m_full, trimmed = m_trim))
+  keep <- which(abs(r_std) <= 2)
+  
+  Data_trim <- Data[keep, ]
+  m_trim <- lmer(fml, data=Data_trim, REML=FALSE, na.action=na.exclude)
+  
+  cat("\n================ Sensitivity:", outcome, "================\n")
+  cat("Full n =", nrow(model.frame(m_full)), "\n")
+  cat("Trim n =", nrow(model.frame(m_trim)), "\n")
+  cat("Full Group:Time p = ", anova(m_full, type=3)["Group:Time", "Pr(>F)"], "\n")
+  cat("Trim Group:Time p = ", anova(m_trim, type=3)["Group:Time", "Pr(>F)"], "\n")
+  cat("========================================================\n")
+  
+  invisible(list(full=m_full, trimmed=m_trim))
 }
 
-# Example runs:
-sens_BDNF <- sensitivity_outlier_check("BDNF", add_education = FALSE)
-sens_CTSB <- sensitivity_outlier_check("CTSB", add_education = FALSE)
+sens_BDNF <- sensitivity_trim_resid("BDNF", add_education = FALSE)
+sens_CTSB <- sensitivity_trim_resid("CTSB", add_education = FALSE)
+sens_Simon <- sensitivity_trim_resid("SimonEffect", add_education = TRUE)
+sens_NBacc <- sensitivity_trim_resid("NBACC_trials", add_education = TRUE)
+sens_NBrt <- sensitivity_trim_resid("NBmeanRT_correct_trials", add_education = TRUE)
 
 
-# 5) Visualization 
+# 11) Visualization (alternative)
 
 # 5.1. Bar plot for BDNF based on LMEM estimated marginal means (EMMs)
 
@@ -465,6 +349,7 @@ ggsave(
   plot = combined,
   width = 8, height = 12, dpi = 300
 )
+
 
 
 
