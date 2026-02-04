@@ -228,8 +228,101 @@ sens_Simon <- sensitivity_trim_resid("SimonEffect", add_education = TRUE)
 sens_NBacc <- sensitivity_trim_resid("NBACC_trials", add_education = TRUE)
 sens_NBrt <- sensitivity_trim_resid("NBmeanRT_correct_trials", add_education = TRUE)
 
+# 11) Exploratory change-change associations
 
-# 11) Visualization (alternative)
+library(purrr)
+library(tibble)
+# Variables to use in exploratory change–change analysis
+vars_need <- c("BDNF","CTSB","SimonEffect","NBACC_trials","NBmeanRT_correct_trials")
+
+# Wide data just for deltas (keeps Group per person)
+Data_wide <- Data %>%
+  select(ID, Group, Time, all_of(vars_need)) %>%
+  pivot_wider(names_from = Time, values_from = all_of(vars_need))
+
+# Compute deltas (post - pre)
+Data_delta <- Data_wide %>%
+  mutate(
+    dBDNF  = BDNF_post  - BDNF_pre,
+    dCTSB  = CTSB_post  - CTSB_pre,
+    dSimon = SimonEffect_post - SimonEffect_pre,
+    dNBacc = NBACC_trials_post - NBACC_trials_pre,
+    dNBrt  = NBmeanRT_correct_trials_post - NBmeanRT_correct_trials_pre
+  )
+
+# Correlation with CI (always returns exactly 1 row)
+cor_ci <- function(x, y, method = c("pearson","spearman"), include_p = FALSE) {
+  method <- match.arg(method)
+  ok <- complete.cases(x, y)
+  x <- x[ok]; y <- y[ok]
+  n <- length(x)
+  
+  if (n < 4) {
+    out <- tibble(n = n, r = NA_real_, lo = NA_real_, hi = NA_real_)
+    if (include_p) out$p <- NA_real_
+    return(out)
+  }
+  
+  ct <- suppressWarnings(stats::cor.test(x, y, method = method, exact = FALSE))
+  r  <- unname(ct$estimate)
+  
+  z  <- atanh(r)
+  se <- 1 / sqrt(n - 3)
+  lo <- tanh(z - 1.96 * se)
+  hi <- tanh(z + 1.96 * se)
+  
+  out <- tibble(n = n, r = r, lo = lo, hi = hi)
+  if (include_p) out$p <- ct$p.value
+  out
+}
+
+pairs <- tibble(
+  myok = c("dBDNF","dBDNF","dBDNF","dCTSB","dCTSB","dCTSB"),
+  cog  = c("dSimon","dNBacc","dNBrt","dSimon","dNBacc","dNBrt")
+)
+
+run_corr_block <- function(df, scope_label, include_p = FALSE) {
+  map_dfr(seq_len(nrow(pairs)), function(i) {
+    mx <- pairs$myok[i]
+    cx <- pairs$cog[i]
+    
+    pear  <- cor_ci(df[[mx]], df[[cx]], method="pearson",  include_p=include_p) %>%
+      mutate(method="pearson")
+    spear <- cor_ci(df[[mx]], df[[cx]], method="spearman", include_p=include_p) %>%
+      mutate(method="spearman")
+    
+    bind_rows(pear, spear) %>%
+      mutate(scope = scope_label, myok = mx, cog = cx)
+  })
+}
+
+include_p <- FALSE  # colleague suggestion
+
+# Overall correlations
+res_overall <- run_corr_block(Data_delta, "Overall", include_p = include_p)
+
+# By-group correlations using group_split + group_keys (robust)
+splits <- Data_delta %>% group_by(Group) %>% group_split()
+keys   <- Data_delta %>% group_by(Group) %>% group_keys()
+
+res_by_group <- map2_dfr(
+  splits,
+  keys$Group,
+  ~ run_corr_block(.x, scope_label = as.character(.y), include_p = include_p)
+)
+
+# Final combined table
+res_corr <- bind_rows(res_overall, res_by_group) %>%
+  arrange(myok, cog, scope, method)
+
+print(res_corr)
+
+res_corr %>%
+  dplyr::filter(scope == "Overall") %>%
+  dplyr::arrange(myok, cog, method) %>%
+  print(n = 100)
+
+# 12) Visualization (alternative)
 
 # 5.1. Bar plot for BDNF based on LMEM estimated marginal means (EMMs)
 
@@ -349,6 +442,7 @@ ggsave(
   plot = combined,
   width = 8, height = 12, dpi = 300
 )
+
 
 
 
