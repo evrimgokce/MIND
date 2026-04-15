@@ -29,6 +29,15 @@ Data <- Data %>%
     Sex   = factor(Sex)
   )
 
+Data <- Data %>%
+  mutate(
+    ID    = factor(ID),
+    Group = factor(Group, levels = c(0, 1, 2), labels = c("cogT", "motT", "DTT")),
+    Time  = factor(Time,  levels = c(1, 2), labels = c("pre", "post")),
+    Sex   = factor(Sex),
+    logBDNF = ifelse(!is.na(BDNF) & BDNF > 0, log(BDNF), NA_real_)
+  )
+
 # Sanity checks
 table(Data$Group, Data$Time, useNA="ifany")
 table(Data$Sex, useNA="ifany")
@@ -145,6 +154,7 @@ run_lmm <- function(outcome, add_education = FALSE, p_adjust = "holm") {
 # Myokines
 res_BDNF <- run_lmm("BDNF", add_education = FALSE, p_adjust = "tukey")
 res_CTSB <- run_lmm("CTSB", add_education = FALSE, p_adjust = "tukey")
+res_BDNF <- run_lmm("logBDNF", add_education = FALSE, p_adjust = "tukey")
 
 # Cognition
 res_Simon <- run_lmm("SimonEffect", add_education = TRUE, p_adjust = "tukey")
@@ -169,6 +179,7 @@ check_diagnostics(res_CTSB$model, "CTSB")
 check_diagnostics(res_Simon$model, "SimonEffect")
 check_diagnostics(res_NBacc$model, "NBACC_trials")
 check_diagnostics(res_NBrt$model, "NBmeanRT_correct_trials")
+check_diagnostics(res_BDNF$model, "logBDNF")
 
 # 9) Visualization using EMMs 
 
@@ -227,6 +238,22 @@ sens_CTSB <- sensitivity_trim_resid("CTSB", add_education = FALSE)
 sens_Simon <- sensitivity_trim_resid("SimonEffect", add_education = TRUE)
 sens_NBacc <- sensitivity_trim_resid("NBACC_trials", add_education = TRUE)
 sens_NBrt <- sensitivity_trim_resid("NBmeanRT_correct_trials", add_education = TRUE)
+sens_BDNF <- sensitivity_trim_resid("logBDNF", add_education = FALSE)
+
+# 10b) Fixed-effects confirmation model for BDNF
+library(car)
+
+m_BDNF_lm <- lm(
+  logBDNF ~ Group * Time + Age + Sex,
+  data = Data,
+  na.action = na.exclude
+)
+
+Anova(m_BDNF_lm, type = 3)
+summary(m_BDNF_lm)
+
+isSingular(res_BDNF$model, tol = 1e-4)
+VarCorr(res_BDNF$model)
 
 # 11) Exploratory change-change associations
 
@@ -359,6 +386,51 @@ ggplot(emm_df, aes(x = Group, y = emmean, fill = Time)) +
 # Save figure
 ggsave(
   filename = "Figure_BDNF.png",
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+# 12) BDNF figure based on log-transformed model
+
+emm_df_log <- as.data.frame(summary(res_BDNF$emm, infer = TRUE))
+
+y_top  <- max(emm_df_log$upper.CL, na.rm = TRUE)
+y_line <- y_top * 1.03
+y_text <- y_top * 1.08
+
+p_BDNF_log <- ggplot(emm_df_log, aes(x = Group, y = emmean, fill = Time)) +
+  geom_bar(
+    stat = "identity",
+    position = position_dodge(width = 0.7),
+    width = 0.65,
+    color = "black"
+  ) +
+  geom_errorbar(
+    aes(ymin = lower.CL, ymax = upper.CL),
+    position = position_dodge(width = 0.7),
+    width = 0.2,
+    linewidth = 0.7
+  ) +
+  annotate("segment", x = 2.88, xend = 3.12, y = y_line, yend = y_line) +
+  annotate("text", x = 3.00, y = y_text, label = "* p = .001", size = 5) +
+  labs(
+    x = "",
+    y = "log(BDNF)",
+    fill = "Time"
+  ) +
+  scale_fill_manual(values = c("gray70", "lightpink")) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(size = 14),
+    axis.text.y = element_text(size = 12)
+  )
+
+p_BDNF_log
+
+ggsave(
+  filename = "Figure_BDNF_log.png",
+  plot = p_BDNF_log,
   width = 8,
   height = 6,
   dpi = 300
